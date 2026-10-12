@@ -71,6 +71,24 @@ public class ScenarioSession {
                 response.getHeaders().getFirst("Idempotent-Replayed")));
     }
 
+    /** Descarga binaria (exportaciones): guarda el estado y, si no es 200, el cuerpo como última respuesta. */
+    public Download download(ApiRequest request) {
+        RestClient.RequestHeadersSpec<?> spec = http.method(request.method()).uri(request.pathAndQuery());
+        if (accessToken != null) {
+            spec.header("Authorization", "Bearer " + accessToken);
+        }
+        Download download = spec.exchange((req, response) -> new Download(response.getStatusCode().value(),
+                response.getHeaders().getFirst("Content-Type"), response.getHeaders().getFirst("Content-Disposition"),
+                response.getBody().readAllBytes()));
+        lastResponse = new ApiResponse(download.status(), download.status() == 200 ? ""
+                : new String(download.content(), StandardCharsets.UTF_8));
+        return download;
+    }
+
+    /** Archivo descargado: estado, tipo, Content-Disposition y bytes. */
+    public record Download(int status, String contentType, String contentDisposition, byte[] content) {
+    }
+
     public int status() {
         return lastResponse.status();
     }
