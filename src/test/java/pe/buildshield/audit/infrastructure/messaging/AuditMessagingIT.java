@@ -5,12 +5,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.kafka.config.KafkaListenerEndpointRegistry;
 import org.springframework.kafka.core.KafkaTemplate;
 import pe.buildshield.audit.application.AuditQueryService;
 import pe.buildshield.audit.domain.model.AuditFilter;
 import pe.buildshield.audit.shared.tenant.TenantContext;
 import pe.buildshield.audit.shared.tenant.TenantInfo;
 import pe.buildshield.audit.support.AuditIntegrationTest;
+import pe.buildshield.audit.support.KafkaReadiness;
 import pe.buildshield.audit.support.TestDatabase;
 import pe.buildshield.audit.support.TestEvents;
 
@@ -41,9 +43,13 @@ class AuditMessagingIT {
     @Autowired
     AuditQueryService queries;
 
+    @Autowired
+    KafkaListenerEndpointRegistry listeners;
+
     @BeforeEach
     void clean() {
         TestDatabase.reset(jdbc);
+        KafkaReadiness.awaitAssignments(listeners);
     }
 
     @Test

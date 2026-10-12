@@ -7,6 +7,14 @@ spring:
       maximum-pool-size: 6
   jpa:
     show-sql: false
+  # Con la máquina cargada el broker embebido tarda en elegir líderes al arrancar: más margen para que los eventos
+  # que envían las pruebas no expiren en el productor (en producción siguen los 10 s de application.yml).
+  kafka:
+    producer:
+      properties:
+        delivery.timeout.ms: 120000
+        request.timeout.ms: 30000
+        max.block.ms: 60000
 
 buildshield:
   # Las pruebas invocan los trabajos periódicos a mano.
