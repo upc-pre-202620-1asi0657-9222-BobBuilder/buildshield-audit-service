@@ -30,6 +30,8 @@ class OpenApiCompletenessIT {
     private static final Set<String> HTTP_METHODS = Set.of("get", "post", "put", "patch", "delete");
     /** 202 y 204 no devuelven cuerpo. */
     private static final Set<String> NO_BODY = Set.of("202", "204");
+    /** Descargas (US48): se documentan con su tipo y un esquema binario, sin ejemplo. */
+    private static final Set<String> FILE_TYPES = Set.of("text/csv", "application/pdf");
 
     @Autowired
     MockMvc mvc;
@@ -55,7 +57,7 @@ class OpenApiCompletenessIT {
             }
         }
 
-        assertThat(operations).as("operaciones documentadas").hasSizeGreaterThanOrEqualTo(2);
+        assertThat(operations).as("operaciones documentadas").hasSizeGreaterThanOrEqualTo(5);
         assertThat(gaps).as("documentación incompleta").isEmpty();
     }
 
@@ -98,7 +100,14 @@ class OpenApiCompletenessIT {
             if (NO_BODY.contains(code)) {
                 continue;
             }
-            JsonNode media = response.getValue().path("content").path("application/json");
+            JsonNode content = response.getValue().path("content");
+            if (FILE_TYPES.stream().anyMatch(type -> !content.path(type).isMissingNode())) {
+                FILE_TYPES.stream().filter(type -> !content.path(type).isMissingNode())
+                        .filter(type -> !"binary".equals(content.path(type).path("schema").path("format").asText()))
+                        .forEach(type -> gaps.add(name + " " + code + ": " + type + " sin esquema binario"));
+                continue;
+            }
+            JsonNode media = content.path("application/json");
             if (media.isMissingNode()) {
                 gaps.add(name + " " + code + ": sin contenido application/json");
                 continue;

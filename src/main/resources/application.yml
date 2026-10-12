@@ -67,3 +67,10 @@ buildshield:
   idempotency:
     enabled: false
   # audit no publica eventos (sin outbox ni tópico propio): solo consume los seis tópicos.
+  reports:
+    # Zona de la empresa: días del periodo del reporte de conciliación y fecha de generación de las exportaciones.
+    zone: ${BUILDSHIELD_REPORTS_ZONE:America/Lima}
+    csv:
+      # Excel en español con coma decimal usa ";" como separador de lista. Con punto decimal: "," y ".".
+      separator: ${BUILDSHIELD_REPORTS_CSV_SEPARATOR:;}
+      decimal-separator: ${BUILDSHIELD_REPORTS_CSV_DECIMAL_SEPARATOR:,}

@@ -29,7 +29,9 @@ class OpenApiDocumentationIT {
                 .andReturn().getResponse().getContentAsString());
 
         assertThat(spec.path("paths").fieldNames()).toIterable()
-                .contains("/api/v1/audit/events", "/api/v1/dispatches/{id}/custody");
+                .contains("/api/v1/audit/events", "/api/v1/dispatches/{id}/custody",
+                        "/api/v1/audit/reports/reconciliation", "/api/v1/audit/reports/reconciliation/export",
+                        "/api/v1/audit/reports/reconciliation/rebuild");
         assertThat(spec.at("/components/securitySchemes/bearer/scheme").asText()).isEqualTo("bearer");
     }
 }
