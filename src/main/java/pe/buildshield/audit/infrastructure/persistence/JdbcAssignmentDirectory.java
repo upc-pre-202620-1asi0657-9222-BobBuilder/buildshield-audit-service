@@ -6,6 +6,8 @@ import pe.buildshield.audit.domain.model.AssignmentDirectory;
 
 import java.sql.Timestamp;
 import java.time.Clock;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.UUID;
 
 /** {@code assignment_projection}: asignaciones vigentes copiadas de organization. */
@@ -43,5 +45,13 @@ class JdbcAssignmentDirectory implements AssignmentDirectory {
                 SELECT EXISTS (SELECT 1 FROM assignment_projection
                                WHERE organization_id = ? AND user_id = ? AND location_id = ?)
                 """, Boolean.class, organizationId, userId, locationId));
+    }
+
+    @Override
+    public Set<UUID> locationsOf(UUID organizationId, UUID userId, String locationType) {
+        return new HashSet<>(jdbc.queryForList("""
+                SELECT location_id FROM assignment_projection
+                WHERE organization_id = ? AND user_id = ? AND location_type = ?
+                """, UUID.class, organizationId, userId, locationType));
     }
 }

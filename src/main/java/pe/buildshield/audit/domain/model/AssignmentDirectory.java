@@ -1,5 +1,6 @@
 package pe.buildshield.audit.domain.model;
 
+import java.util.Set;
 import java.util.UUID;
 
 /** Copia local de las asignaciones de encargados a obras y almacenes. */
@@ -10,4 +11,7 @@ public interface AssignmentDirectory {
     void unassign(UUID assignmentId);
 
     boolean isAssigned(UUID organizationId, UUID userId, UUID locationId);
+
+    /** Obras ({@code WORKSITE}) o almacenes ({@code WAREHOUSE}) asignados al usuario. */
+    Set<UUID> locationsOf(UUID organizationId, UUID userId, String locationType);
 }

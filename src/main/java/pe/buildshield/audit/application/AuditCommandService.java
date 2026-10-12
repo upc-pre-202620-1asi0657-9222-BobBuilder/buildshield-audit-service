@@ -14,11 +14,13 @@ import pe.buildshield.audit.shared.correlation.CorrelationId;
 import pe.buildshield.audit.shared.messaging.EventEnvelope;
 
 import java.time.Clock;
+import java.time.Instant;
 import java.util.UUID;
 
 /**
  * Registra cada evento de integración en el registro de solo anexado y mantiene las copias locales que la
- * custodia necesita (usuarios y asignaciones). Cualquier tipo de evento se registra, también los desconocidos.
+ * custodia necesita (usuarios y asignaciones) y el read model de conciliación (US47), en la misma transacción.
+ * Cualquier tipo de evento se registra, también los desconocidos.
  */
 @Service
 public class AuditCommandService {
@@ -28,13 +30,15 @@ public class AuditCommandService {
     private final AuditLogRepository auditLog;
     private final UserDirectory users;
     private final AssignmentDirectory assignments;
+    private final ReconciliationProjector reconciliation;
     private final Clock clock;
 
     public AuditCommandService(AuditLogRepository auditLog, UserDirectory users, AssignmentDirectory assignments,
-            Clock clock) {
+            ReconciliationProjector reconciliation, Clock clock) {
         this.auditLog = auditLog;
         this.users = users;
         this.assignments = assignments;
+        this.reconciliation = reconciliation;
         this.clock = clock;
     }
 
@@ -43,15 +47,18 @@ public class AuditCommandService {
     public boolean record(String topic, EventEnvelope event) {
         JsonNode payload = event.payload() == null || event.payload().isNull()
                 ? com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode() : event.payload();
+        Instant occurredAt = event.occurredAt() == null ? clock.instant() : event.occurredAt();
         boolean appended = auditLog.append(new AuditEntry(UUID.randomUUID(), event.eventId(), topic, event.eventType(),
-                event.aggregateType(), event.aggregateId(), event.organizationId(), event.actorId(),
-                event.occurredAt() == null ? clock.instant() : event.occurredAt(), clock.instant(),
-                MDC.get(CorrelationId.MDC_KEY), payload.toString()));
+                event.aggregateType(), event.aggregateId(), event.organizationId(), event.actorId(), occurredAt,
+                clock.instant(), MDC.get(CorrelationId.MDC_KEY), payload.toString()));
         if (!appended) {
             log.debug("Evento {} ya registrado", event.eventId());
             return false;
         }
         updateCopies(event, payload);
+        if (reconciliation.handles(event.eventType())) {
+            reconciliation.apply(event.eventType(), event.organizationId(), event.aggregateId(), occurredAt, payload);
+        }
         return true;
     }
 

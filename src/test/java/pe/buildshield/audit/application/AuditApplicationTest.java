@@ -27,7 +27,8 @@ class AuditApplicationTest {
     private final ObjectMapper json = new ObjectMapper().findAndRegisterModules();
     private final InMemoryAudit store = new InMemoryAudit();
     private final MutableClock clock = new MutableClock(T0);
-    private final AuditCommandService commands = new AuditCommandService(store, store, store, clock);
+    private final AuditCommandService commands = new AuditCommandService(store, store, store,
+            new ReconciliationProjector(new InMemoryReconciliation()), clock);
     private final AuditQueryService queries = new AuditQueryService(store, store);
     private final CustodyQueryService custody = new CustodyQueryService(store, store, store, json);
 

@@ -1,8 +1,10 @@
 package pe.buildshield.audit.domain.model;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 /** Registro de solo anexado: no hay operaciones para cambiar ni borrar entradas. */
 public interface AuditLogRepository {
@@ -17,4 +19,12 @@ public interface AuditLogRepository {
 
     /** Obra de destino del despacho según sus eventos, si alguno la trae. */
     Optional<UUID> findDispatchWorksite(UUID organizationId, UUID dispatchId);
+
+    /**
+     * Recorre, del más antiguo al más reciente, los eventos de la organización de esos tipos (reconstrucción de los
+     * read models).
+     *
+     * @return cuántos eventos recorrió
+     */
+    int replay(UUID organizationId, Collection<String> eventTypes, Consumer<AuditEntry> action);
 }

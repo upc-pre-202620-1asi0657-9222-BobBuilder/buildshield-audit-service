@@ -10,9 +10,12 @@ import pe.buildshield.audit.domain.model.AuditPage;
 
 import java.sql.Timestamp;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 
 /**
  * {@code audit_log} con JDBC: solo INSERT y SELECT. El trigger de la base rechaza UPDATE, DELETE y TRUNCATE aunque
@@ -90,6 +93,24 @@ class JdbcAuditLogRepository implements AuditLogRepository {
                 ORDER BY occurred_at LIMIT 1
                 """, (rs, row) -> UUID.fromString(rs.getString(1)), organizationId, dispatchId.toString(),
                 dispatchId.toString()).stream().findFirst();
+    }
+
+    @Override
+    public int replay(UUID organizationId, Collection<String> eventTypes, Consumer<AuditEntry> action) {
+        if (eventTypes.isEmpty()) {
+            return 0;
+        }
+        AtomicInteger count = new AtomicInteger();
+        // RowCallbackHandler: recorre fila por fila sin cargar todo el historial en memoria.
+        jdbc.query("SELECT " + COLUMNS + """
+                 FROM audit_log
+                WHERE organization_id = ? AND event_type = ANY (?)
+                ORDER BY occurred_at, recorded_at, id
+                """, rs -> {
+                    action.accept(ROW.mapRow(rs, count.get()));
+                    count.incrementAndGet();
+                }, organizationId, eventTypes.toArray(new String[0]));
+        return count.get();
     }
 
     private static void condition(StringBuilder where, List<Object> params, String sql, Object value) {

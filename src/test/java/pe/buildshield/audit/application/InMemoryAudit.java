@@ -14,6 +14,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.function.Consumer;
+import java.util.stream.Collectors;
 import java.util.UUID;
 
 /** Registro, usuarios y asignaciones en memoria, con el mismo filtro por organización que JDBC. */
@@ -22,6 +25,7 @@ class InMemoryAudit implements AuditLogRepository, UserDirectory, AssignmentDire
     final List<AuditEntry> entries = new ArrayList<>();
     final Map<UUID, String[]> users = new HashMap<>();
     final Map<UUID, UUID[]> assignments = new HashMap<>();
+    final Map<UUID, String> assignmentTypes = new HashMap<>();
 
     @Override
     public boolean append(AuditEntry entry) {
@@ -82,6 +86,7 @@ class InMemoryAudit implements AuditLogRepository, UserDirectory, AssignmentDire
     @Override
     public void assign(UUID organizationId, UUID assignmentId, UUID userId, UUID locationId, String locationType) {
         assignments.put(assignmentId, new UUID[]{organizationId, userId, locationId});
+        assignmentTypes.put(assignmentId, locationType);
     }
 
     @Override
@@ -93,5 +98,24 @@ class InMemoryAudit implements AuditLogRepository, UserDirectory, AssignmentDire
     public boolean isAssigned(UUID organizationId, UUID userId, UUID locationId) {
         return assignments.values().stream().anyMatch(a -> a[0].equals(organizationId) && a[1].equals(userId)
                 && a[2].equals(locationId));
+    }
+
+    @Override
+    public Set<UUID> locationsOf(UUID organizationId, UUID userId, String locationType) {
+        return assignments.entrySet().stream()
+                .filter(e -> e.getValue()[0].equals(organizationId) && e.getValue()[1].equals(userId)
+                        && locationType.equals(assignmentTypes.get(e.getKey())))
+                .map(e -> e.getValue()[2]).collect(Collectors.toSet());
+    }
+
+    @Override
+    public int replay(UUID organizationId, Collection<String> eventTypes, Consumer<AuditEntry> action) {
+        List<AuditEntry> found = entries.stream()
+                .filter(entry -> entry.organizationId().equals(organizationId))
+                .filter(entry -> eventTypes.contains(entry.eventType()))
+                .sorted(Comparator.comparing(AuditEntry::occurredAt).thenComparing(AuditEntry::recordedAt))
+                .toList();
+        found.forEach(action);
+        return found.size();
     }
 }
