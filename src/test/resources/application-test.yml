@@ -15,6 +15,10 @@ spring:
         delivery.timeout.ms: 120000
         request.timeout.ms: 30000
         max.block.ms: 60000
+    # Cada contexto de prueba (integración, health y Cucumber) queda en caché con su consumidor vivo. Con un grupo
+    # propio por contexto, un consumidor viejo no entra al grupo del broker siguiente si este reutiliza el puerto.
+    consumer:
+      group-id: buildshield-audit-service-test-${random.uuid}
 
 buildshield:
   # Las pruebas invocan los trabajos periódicos a mano.
