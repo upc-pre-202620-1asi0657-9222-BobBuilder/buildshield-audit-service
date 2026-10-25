@@ -84,9 +84,12 @@ class AuditPerformanceIT {
 
     @Test
     void the_reconciliation_report_over_a_large_history_is_built_from_the_log_in_under_ten_seconds() {
-        // 40 000 salidas de despacho de dos líneas cada una (80 000 líneas), insertadas en bloque.
-        jdbc.execute("SET session_replication_role = replica");
-        try {
+        // 40 000 salidas de despacho de dos líneas cada una (80 000 líneas), insertadas en bloque. Los SET LOCAL van en
+        // la misma transacción que el INSERT para que valgan en esa conexión: sin trigger y sin el statement_timeout
+        // de 5 s, que con la máquina cargada corta la carga de datos (lo medido es el reporte, no esta preparación).
+        new TransactionTemplate(transactions).executeWithoutResult(status -> {
+            jdbc.execute("SET LOCAL statement_timeout = 0");
+            jdbc.execute("SET LOCAL session_replication_role = replica");
             jdbc.update("""
                     INSERT INTO audit_log (event_id, organization_id, aggregate_type, aggregate_id, action,
                         actor_user_id, occurred_at, after_value, prev_hash, hash)
@@ -107,9 +110,7 @@ class AuditPerformanceIT {
                         md5(n::text) || md5(n::text), md5(n::text) || md5('x' || n::text)
                     FROM (SELECT n, gen_random_uuid() AS id FROM generate_series(1, ?) AS n) d
                     """, organization, admin, DISPATCHES);
-        } finally {
-            jdbc.execute("SET session_replication_role = DEFAULT");
-        }
+        });
         assertThat(jdbc.queryForObject("SELECT count(*) FROM audit_log", Long.class)).isEqualTo(DISPATCHES);
 
         long started = System.nanoTime();
