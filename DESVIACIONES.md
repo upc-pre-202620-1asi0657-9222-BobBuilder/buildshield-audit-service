@@ -25,6 +25,7 @@ Los read models del Sprint 4 (`location_projection`, `material_projection`, `rec
 
 - `AuditEventConsumer` escucha los seis tópicos con un solo `@KafkaListener`; es el valor de `processed_events.consumer`.
 - Clases de apoyo que se conservan: `CustodyQueryService` (línea de tiempo de custodia, US39), `CustodyExportService` y `PdfCustodyRenderer` (PDF de la custodia, RNF03), `ReconciliationQueryService`, `ReconciliationExportService`, `ReconciliationProjector` y `InMemoryReconciliationReadModel` (reporte de conciliación, US47 y US48), con sus renderers CSV y PDF.
+- El componente «Audit Repository» del C4 se implementa como `AuditLogRepository` (puerto) y `JdbcAuditLogRepository` (adaptador), con el nombre de la tabla `audit_log`.
 - `AuditController` incluye `GET /audit/verify`; la custodia (`CustodyController`) y el reporte (`ReconciliationReportController`) son controladores por recurso.
 
 ## Endpoints
