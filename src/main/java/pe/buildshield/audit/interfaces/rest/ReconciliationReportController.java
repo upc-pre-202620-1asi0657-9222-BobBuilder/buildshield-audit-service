@@ -22,7 +22,6 @@ import org.springframework.web.bind.annotation.RestController;
 import pe.buildshield.audit.application.ReconciliationExportService;
 import pe.buildshield.audit.application.ReconciliationQueryService;
 import pe.buildshield.audit.application.ReconciliationQueryService.ReconciliationFilter;
-import pe.buildshield.audit.application.ReconciliationRebuildService;
 import pe.buildshield.audit.domain.model.reconciliation.ReconciliationReport;
 import pe.buildshield.audit.shared.error.ErrorResponse;
 
@@ -38,13 +37,10 @@ class ReconciliationReportController {
 
     private final ReconciliationQueryService queries;
     private final ReconciliationExportService exports;
-    private final ReconciliationRebuildService rebuild;
 
-    ReconciliationReportController(ReconciliationQueryService queries, ReconciliationExportService exports,
-            ReconciliationRebuildService rebuild) {
+    ReconciliationReportController(ReconciliationQueryService queries, ReconciliationExportService exports) {
         this.queries = queries;
         this.exports = exports;
-        this.rebuild = rebuild;
     }
 
     @GetMapping
@@ -105,22 +101,4 @@ class ReconciliationReportController {
                 .body(file.content());
     }
 
-    @PostMapping("/rebuild")
-    @PreAuthorize("hasRole('ADMINISTRATOR')")
-    @Operation(summary = "Reconstruir el read model de conciliación",
-            description = "Vacía el read model de la organización y vuelve a aplicar, en orden, los eventos del "
-                    + "registro de solo anexado que lo alimentan (despachos, recepciones, discrepancias, obras, "
-                    + "almacenes y materiales). Sirve para el historial anterior al reporte. Solo el administrador.")
-    @ApiResponse(responseCode = "200", description = "Eventos aplicados",
-            content = @Content(schema = @Schema(implementation = RebuildResource.class),
-                    examples = @ExampleObject(value = ReconciliationApiExamples.REBUILD)))
-    @ApiResponse(responseCode = "403", description = "El usuario no es administrador",
-            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
-    RebuildResource rebuild() {
-        return new RebuildResource(rebuild.rebuild());
-    }
-
-    @Schema(description = "Resultado de la reconstrucción")
-    record RebuildResource(@Schema(description = "Eventos del registro que se volvieron a aplicar") int eventsReplayed) {
-    }
 }

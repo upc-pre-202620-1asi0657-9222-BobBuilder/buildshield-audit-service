@@ -130,7 +130,7 @@ public record ReconciliationReport(Filters filters, Instant generatedAt, String 
                 rows.stream().mapToInt(MaterialRow::linesOutOfTolerance).sum(), discrepancies.size());
 
         return new ReconciliationReport(filters, generatedAt, generatedBy, rows, totalsByUnit(rows), summary,
-                pendingCases(active, pendingDispatches, discrepancies, locationNames));
+                pendingCases(active, discrepancies, locationNames));
     }
 
     private static MaterialRow row(GroupKey key, List<ReconciliationLine> group, List<DiscrepancyCase> discrepancies,
@@ -203,12 +203,19 @@ public record ReconciliationReport(Filters filters, Instant generatedAt, String 
         return totals;
     }
 
-    private static List<PendingCase> pendingCases(List<ReconciliationLine> lines, Set<UUID> pendingDispatches,
-            List<DiscrepancyCase> discrepancies, Map<UUID, String> locationNames) {
+    private static List<PendingCase> pendingCases(List<ReconciliationLine> lines, List<DiscrepancyCase> discrepancies,
+            Map<UUID, String> locationNames) {
         List<PendingCase> cases = new ArrayList<>();
-        for (UUID dispatchId : pendingDispatches) {
-            List<ReconciliationLine> pending = lines.stream().filter(line -> line.dispatchId().equals(dispatchId)
-                    && line.status().pendingReception()).toList();
+        // Se agrupa una sola vez: buscar las líneas de cada despacho recorriendo todas es cuadrático con el historial.
+        Map<UUID, List<ReconciliationLine>> pendingByDispatch = new LinkedHashMap<>();
+        for (ReconciliationLine line : lines) {
+            if (line.status().pendingReception()) {
+                pendingByDispatch.computeIfAbsent(line.dispatchId(), id -> new ArrayList<>()).add(line);
+            }
+        }
+        for (Map.Entry<UUID, List<ReconciliationLine>> entry : pendingByDispatch.entrySet()) {
+            UUID dispatchId = entry.getKey();
+            List<ReconciliationLine> pending = entry.getValue();
             ReconciliationLine first = pending.get(0);
             boolean partial = pending.stream().anyMatch(line -> line.status() == LineStatus.PARTIALLY_RECEIVED);
             Instant since = pending.stream().map(ReconciliationLine::departedAt).filter(Objects::nonNull)

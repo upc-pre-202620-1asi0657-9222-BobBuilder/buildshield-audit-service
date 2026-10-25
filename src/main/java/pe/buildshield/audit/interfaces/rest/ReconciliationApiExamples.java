@@ -69,9 +69,6 @@ final class ReconciliationApiExamples {
               ]
             }""";
 
-    static final String REBUILD = """
-            {"eventsReplayed": 128}""";
-
     private ReconciliationApiExamples() {
     }
 }

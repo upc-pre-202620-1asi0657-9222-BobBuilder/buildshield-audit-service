@@ -15,7 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.function.Consumer;
 
 /**
- * Consumo idempotente: en una sola transacción registra el {@code eventId} en {@code processed_events}
+ * Consumo idempotente: en una sola transacción registra {@code (eventId, consumer)} en {@code processed_events}
  * y aplica el efecto. Si el evento ya estaba registrado lo ignora. Si el efecto falla, la transacción
  * se revierte (el evento tampoco queda registrado) y el contenedor de Kafka lo reintenta.
  *
@@ -41,13 +41,13 @@ public class IdempotentEventProcessor {
     }
 
     /** @return {@code true} si se procesó; {@code false} si era un duplicado */
-    public boolean process(ConsumerRecord<String, String> record, Consumer<EventEnvelope> handler) {
+    public boolean process(ConsumerRecord<String, String> record, String consumer, Consumer<EventEnvelope> handler) {
         Header correlation = record.headers().lastHeader(CorrelationId.HEADER);
         String correlationId = correlation == null ? null : new String(correlation.value(), StandardCharsets.UTF_8);
-        return process(record.value(), correlationId, handler);
+        return process(record.value(), correlationId, consumer, handler);
     }
 
-    public boolean process(String message, String correlationId, Consumer<EventEnvelope> handler) {
+    public boolean process(String message, String correlationId, String consumer, Consumer<EventEnvelope> handler) {
         EventEnvelope envelope = parse(message);
         TenantInfo tenant = new TenantInfo(envelope.organizationId(),
                 envelope.actorId() == null ? TenantContext.SYSTEM_USER_ID : envelope.actorId(), SYSTEM_ROLE);
@@ -55,8 +55,9 @@ public class IdempotentEventProcessor {
         // La organización se fija antes de abrir la transacción: el filtro de Hibernate se activa al abrir la sesión.
         CorrelationId.runWith(correlationId, () -> TenantContext.runAs(tenant, () -> processed[0] = Boolean.TRUE.equals(
                 transactionTemplate.execute(status -> {
-                    if (!processedEvents.markProcessed(envelope.eventId())) {
-                        log.debug("Evento {} {} ya procesado: se ignora", envelope.eventType(), envelope.eventId());
+                    if (!processedEvents.markProcessed(envelope.eventId(), consumer)) {
+                        log.debug("Evento {} {} ya procesado por {}: se ignora", envelope.eventType(), envelope.eventId(),
+                                consumer);
                         return false;
                     }
                     handler.accept(envelope);

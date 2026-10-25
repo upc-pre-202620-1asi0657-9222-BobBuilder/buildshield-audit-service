@@ -10,23 +10,27 @@ final class AuditApiExamples {
             {
               "items": [
                 {
-                  "id": "0b1c2d3e-4f5a-4b6c-8d7e-8f9a0b1c2d3e",
+                  "id": 1204,
                   "eventId": "9c8b7a6f-5e4d-4c3b-8a2f-1e0d9c8b7a6f",
-                  "topic": "buildshield.ordering",
                   "eventType": "DispatchDeparted",
-                  "aggregateType": "DISPATCH",
+                  "aggregateType": "Dispatch",
                   "aggregateId": "6f7a8b9c-0d1e-4f2a-8b3c-4d5e6f7a8b9c",
                   "actorId": "8a9b0c1d-2e3f-4a5b-8c6d-7e8f9a0b1c2d",
                   "actorName": "Rosa Quispe",
                   "occurredAt": "2026-11-03T13:30:00Z",
-                  "recordedAt": "2026-11-03T13:30:01Z",
-                  "payload": {"dispatchId": "6f7a8b9c-0d1e-4f2a-8b3c-4d5e6f7a8b9c", "departedAt": "2026-11-03T13:30:00Z"}
+                  "beforeValue": null,
+                  "payload": {"dispatchId": "6f7a8b9c-0d1e-4f2a-8b3c-4d5e6f7a8b9c", "departedAt": "2026-11-03T13:30:00Z"},
+                  "prevHash": "3b1f0c7e9d2a4856b1c0e7f3a9d84c5e2b6f10a7d3c9e8b4f5a1d2c3e4b5a697",
+                  "hash": "c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3"
                 }
               ],
               "page": 0,
               "size": 50,
               "total": 1
             }""";
+
+    static final String VERIFICATION = """
+            {"valid": true, "entriesChecked": 1204, "brokenEntryId": null, "reason": null}""";
 
     static final String CUSTODY = """
             {

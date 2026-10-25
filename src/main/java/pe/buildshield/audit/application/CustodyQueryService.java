@@ -53,26 +53,31 @@ public class CustodyQueryService {
             throw new ResourceNotFoundException("DISPATCH_NOT_FOUND", "El despacho " + dispatchId + " no existe");
         }
         Map<UUID, String> names = users.names(organizationId,
-                entries.stream().map(AuditEntry::actorId).filter(Objects::nonNull).distinct().toList());
+                entries.stream().map(AuditEntry::actorUserId).filter(Objects::nonNull).distinct().toList());
         String manifestCode = null;
         List<CustodyEvent> events = new ArrayList<>();
         for (AuditEntry entry : entries) {
-            var type = CustodyEventType.fromEventType(entry.eventType());
+            var type = CustodyEventType.fromEventType(entry.action());
             if (type.isEmpty()) {
                 continue;
             }
-            JsonNode payload = read(entry.payload());
+            JsonNode payload = read(entry.afterValue());
             if (manifestCode == null && payload.hasNonNull("manifestCode")) {
                 manifestCode = payload.get("manifestCode").asText();
             }
-            events.add(new CustodyEvent(entry.occurredAt(), type.get(), type.get().label(), entry.actorId(),
-                    entry.actorId() == null ? null : names.get(entry.actorId()),
+            events.add(new CustodyEvent(entry.occurredAt(), type.get(), type.get().label(), actor(entry),
+                    actor(entry) == null ? null : names.get(entry.actorUserId()),
                     CustodyDetails.describe(type.get(), payload)));
         }
         if (events.isEmpty()) {
             throw new ResourceNotFoundException("DISPATCH_NOT_FOUND", "El despacho " + dispatchId + " no existe");
         }
         return new Custody(dispatchId, manifestCode, events);
+    }
+
+    /** Las acciones del sistema no tienen usuario. */
+    private static UUID actor(AuditEntry entry) {
+        return AuditEntry.SYSTEM_USER_ID.equals(entry.actorUserId()) ? null : entry.actorUserId();
     }
 
     private boolean canSee(TenantInfo requester, UUID dispatchId) {
@@ -86,7 +91,7 @@ public class CustodyQueryService {
 
     private JsonNode read(String payload) {
         try {
-            return json.readTree(payload);
+            return payload == null ? json.createObjectNode() : json.readTree(payload);
         } catch (IOException ex) {
             return json.createObjectNode();
         }

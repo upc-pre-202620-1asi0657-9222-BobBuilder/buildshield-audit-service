@@ -5,6 +5,7 @@ import pe.buildshield.audit.domain.model.AuditEntry;
 import pe.buildshield.audit.domain.model.AuditFilter;
 import pe.buildshield.audit.domain.model.AuditLogRepository;
 import pe.buildshield.audit.domain.model.AuditPage;
+import pe.buildshield.audit.domain.model.NewAuditEntry;
 import pe.buildshield.audit.domain.model.UserDirectory;
 
 import java.util.ArrayList;
@@ -27,21 +28,28 @@ class InMemoryAudit implements AuditLogRepository, UserDirectory, AssignmentDire
     final Map<UUID, UUID[]> assignments = new HashMap<>();
     final Map<UUID, String> assignmentTypes = new HashMap<>();
 
+    /** Encadena como la base: a la huella de la última entrada de la organización, o a los 64 ceros. */
     @Override
-    public boolean append(AuditEntry entry) {
+    public Optional<AuditEntry> append(NewAuditEntry entry) {
         if (entries.stream().anyMatch(existing -> existing.eventId().equals(entry.eventId()))) {
-            return false;
+            return Optional.empty();
         }
-        entries.add(entry);
-        return true;
+        String prevHash = entries.stream().filter(e -> e.organizationId().equals(entry.organizationId()))
+                .reduce((first, second) -> second).map(AuditEntry::hash).orElse(AuditEntry.GENESIS_HASH);
+        AuditEntry chained = AuditEntry.chain(entry, prevHash);
+        AuditEntry stored = new AuditEntry((long) entries.size() + 1, chained.eventId(), chained.organizationId(),
+                chained.aggregateType(), chained.aggregateId(), chained.action(), chained.actorUserId(),
+                chained.occurredAt(), chained.beforeValue(), chained.afterValue(), chained.prevHash(), chained.hash());
+        entries.add(stored);
+        return Optional.of(stored);
     }
 
     @Override
     public AuditPage search(UUID organizationId, AuditFilter filter) {
         List<AuditEntry> found = entries.stream()
                 .filter(entry -> entry.organizationId().equals(organizationId))
-                .filter(entry -> filter.eventType() == null || filter.eventType().equals(entry.eventType()))
-                .filter(entry -> filter.actorId() == null || filter.actorId().equals(entry.actorId()))
+                .filter(entry -> filter.action() == null || filter.action().equals(entry.action()))
+                .filter(entry -> filter.actorUserId() == null || filter.actorUserId().equals(entry.actorUserId()))
                 .sorted(Comparator.comparing(AuditEntry::occurredAt).reversed())
                 .toList();
         List<AuditEntry> page = found.stream().skip(filter.offset()).limit(filter.size()).toList();
@@ -52,7 +60,7 @@ class InMemoryAudit implements AuditLogRepository, UserDirectory, AssignmentDire
     public List<AuditEntry> findByDispatch(UUID organizationId, UUID dispatchId) {
         return entries.stream()
                 .filter(entry -> entry.organizationId().equals(organizationId))
-                .filter(entry -> entry.payload().contains(dispatchId.toString()))
+                .filter(entry -> entry.afterValue().contains(dispatchId.toString()))
                 .sorted(Comparator.comparing(AuditEntry::occurredAt))
                 .toList();
     }
@@ -60,7 +68,7 @@ class InMemoryAudit implements AuditLogRepository, UserDirectory, AssignmentDire
     @Override
     public Optional<UUID> findDispatchWorksite(UUID organizationId, UUID dispatchId) {
         return findByDispatch(organizationId, dispatchId).stream()
-                .map(entry -> entry.payload().replaceAll(".*\"worksiteId\":\"([0-9a-f-]{36})\".*", "$1"))
+                .map(entry -> entry.afterValue().replaceAll(".*\"worksiteId\":\"([0-9a-f-]{36})\".*", "$1"))
                 .filter(value -> value.length() == 36)
                 .map(UUID::fromString)
                 .findFirst();
@@ -109,13 +117,21 @@ class InMemoryAudit implements AuditLogRepository, UserDirectory, AssignmentDire
     }
 
     @Override
-    public int replay(UUID organizationId, Collection<String> eventTypes, Consumer<AuditEntry> action) {
+    public int replay(UUID organizationId, Collection<String> actions, Consumer<AuditEntry> consumer) {
         List<AuditEntry> found = entries.stream()
                 .filter(entry -> entry.organizationId().equals(organizationId))
-                .filter(entry -> eventTypes.contains(entry.eventType()))
-                .sorted(Comparator.comparing(AuditEntry::occurredAt).thenComparing(AuditEntry::recordedAt))
+                .filter(entry -> actions.contains(entry.action()))
+                .sorted(Comparator.comparing(AuditEntry::occurredAt).thenComparing(AuditEntry::id))
                 .toList();
-        found.forEach(action);
+        found.forEach(consumer);
+        return found.size();
+    }
+
+    @Override
+    public int forEachInChainOrder(UUID organizationId, Consumer<AuditEntry> consumer) {
+        List<AuditEntry> found = entries.stream().filter(entry -> entry.organizationId().equals(organizationId))
+                .toList();
+        found.forEach(consumer);
         return found.size();
     }
 }

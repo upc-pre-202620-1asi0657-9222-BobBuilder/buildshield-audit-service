@@ -190,6 +190,45 @@ public class AuditSteps {
         body.path("items").forEach(item -> assertThat(item.path("eventType").asText()).isEqualTo(eventType));
     }
 
+    @Entonces("la cadena es válida y revisó {int} entradas")
+    public void chainIsValid(int entries) throws Exception {
+        session.expectStatus(200);
+        assertThat(session.body().path("valid").asBoolean()).isTrue();
+        assertThat(session.body().path("entriesChecked").asInt()).isEqualTo(entries);
+    }
+
+    @Entonces("la cadena está rota en la entrada {int}")
+    public void chainIsBroken(int position) throws Exception {
+        session.expectStatus(200);
+        assertThat(session.body().path("valid").asBoolean()).isFalse();
+        Long id = jdbc.queryForObject("SELECT id FROM audit_log WHERE organization_id = ? ORDER BY id OFFSET ? LIMIT 1",
+                Long.class, organization, position - 1);
+        assertThat(session.body().path("brokenEntryId").asLong()).isEqualTo(id);
+    }
+
+    @Entonces("cada entrada del registro está encadenada a la anterior")
+    public void everyEntryIsChained() throws Exception {
+        session.expectStatus(200);
+        JsonNode items = session.body().path("items");
+        assertThat(items.size()).isGreaterThan(1);
+        java.util.Set<String> hashes = new java.util.HashSet<>();
+        items.forEach(item -> {
+            assertThat(item.path("hash").asText()).hasSize(64);
+            hashes.add(item.path("hash").asText());
+        });
+        assertThat(hashes).as("cada entrada tiene su propia huella").hasSize(items.size());
+        long first = 0;
+        for (JsonNode item : items) {
+            String prev = item.path("prevHash").asText();
+            if (prev.equals("0".repeat(64))) {
+                first++;
+            } else {
+                assertThat(hashes).as("la entrada anterior de la cadena está en el registro").contains(prev);
+            }
+        }
+        assertThat(first).as("solo la primera entrada parte de 64 ceros").isEqualTo(1);
+    }
+
     @Entonces("ve {int} eventos en total, del más reciente al más antiguo")
     public void allEvents(int count) throws Exception {
         session.expectStatus(200);
@@ -287,11 +326,20 @@ public class AuditSteps {
                         "quantity", quantity, "status", "OPEN", "text", "Faltan bolsas"))));
     }
 
-    @Dado("que el read model de conciliación se borró")
-    public void readModelCleared() {
+    @Dado("que alguien altera directamente la entrada {int} del registro de auditoría")
+    public void tamperWithEntry(int position) {
         awaitEvents();
-        jdbc.update("DELETE FROM reconciliation_line WHERE organization_id = ?", organization);
-        jdbc.update("DELETE FROM reconciliation_discrepancy WHERE organization_id = ?", organization);
+        Long id = jdbc.queryForObject("SELECT id FROM audit_log WHERE organization_id = ? ORDER BY id OFFSET ? LIMIT 1",
+                Long.class, organization, position - 1);
+        // Solo un superusuario con el trigger apagado en su sesión puede hacerlo: la verificación debe delatarlo.
+        jdbc.execute((org.springframework.jdbc.core.ConnectionCallback<Void>) connection -> {
+            try (var statement = connection.createStatement()) {
+                statement.execute("SET session_replication_role = replica");
+                statement.execute("UPDATE audit_log SET after_value = '{\"alterado\": true}' WHERE id = " + id);
+                statement.execute("SET session_replication_role = DEFAULT");
+            }
+            return null;
+        });
     }
 
     @Cuando("{string} consulta la conciliación de {string} del {string} al {string}")
@@ -309,11 +357,11 @@ public class AuditSteps {
         session.send(get("/api/v1/audit/reports/reconciliation").param("from", from).param("to", to), null);
     }
 
-    @Cuando("{string} reconstruye el read model de conciliación")
-    public void rebuild(String name) throws Exception {
+    @Cuando("{string} verifica la cadena de huellas del registro de auditoría")
+    public void verifyChain(String name) throws Exception {
         awaitEvents();
         signIn(name);
-        session.send(post("/api/v1/audit/reports/reconciliation/rebuild"), null);
+        session.send(get("/api/v1/audit/verify"), null);
     }
 
     @Cuando("{string} exporta la conciliación de {string} del {string} al {string} en {string}")
@@ -365,12 +413,6 @@ public class AuditSteps {
         JsonNode body = session.body();
         assertThat(body.path("summary").path("dispatchCount").asInt()).isEqualTo(dispatches);
         body.path("rows").forEach(row -> assertThat(row.path("worksiteName").asText()).isEqualTo(worksite));
-    }
-
-    @Entonces("se volvieron a aplicar {int} eventos")
-    public void replayed(int count) throws Exception {
-        session.expectStatus(200);
-        assertThat(session.body().path("eventsReplayed").asInt()).isEqualTo(count);
     }
 
     @Entonces("descarga un archivo {string} con extensión {string}")

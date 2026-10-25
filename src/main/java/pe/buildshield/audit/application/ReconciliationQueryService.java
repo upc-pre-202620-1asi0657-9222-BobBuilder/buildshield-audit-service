@@ -1,9 +1,12 @@
 package pe.buildshield.audit.application;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import pe.buildshield.audit.domain.model.AssignmentDirectory;
+import pe.buildshield.audit.domain.model.AuditLogRepository;
 import pe.buildshield.audit.domain.model.UserDirectory;
 import pe.buildshield.audit.domain.model.reconciliation.DiscrepancyCase;
 import pe.buildshield.audit.domain.model.reconciliation.ReconciliationCriteria;
@@ -16,6 +19,7 @@ import pe.buildshield.audit.shared.error.ValidationException;
 import pe.buildshield.audit.shared.tenant.TenantContext;
 import pe.buildshield.audit.shared.tenant.TenantInfo;
 
+import java.io.IOException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -50,15 +54,17 @@ public class ReconciliationQueryService {
     static final String WORKSITE = "WORKSITE";
     static final String WAREHOUSE = "WAREHOUSE";
 
-    private final ReconciliationReadModel readModel;
+    private final AuditLogRepository auditLog;
+    private final ObjectMapper json;
     private final AssignmentDirectory assignments;
     private final UserDirectory users;
     private final Clock clock;
     private final ZoneId zone;
 
-    public ReconciliationQueryService(ReconciliationReadModel readModel, AssignmentDirectory assignments,
+    public ReconciliationQueryService(AuditLogRepository auditLog, ObjectMapper json, AssignmentDirectory assignments,
             UserDirectory users, Clock clock, @Value("${buildshield.reports.zone:America/Lima}") String zone) {
-        this.readModel = readModel;
+        this.auditLog = auditLog;
+        this.json = json;
         this.assignments = assignments;
         this.users = users;
         this.clock = clock;
@@ -78,6 +84,8 @@ public class ReconciliationQueryService {
         TenantInfo requester = TenantContext.require();
         UUID organizationId = requester.organizationId();
         ReconciliationCriteria criteria = criteria(requester, filter);
+        ReconciliationReadModel readModel = criteria.matchesNothing() ? new InMemoryReconciliationReadModel()
+                : replayed(organizationId);
 
         List<ReconciliationLine> lines = criteria.matchesNothing() ? List.of()
                 : readModel.findLines(organizationId, criteria);
@@ -99,6 +107,26 @@ public class ReconciliationQueryService {
                 filter.warehouseId() == null ? null : names.get(filter.warehouseId()), filter.from(), filter.to());
         return ReconciliationReport.build(filters, clock.instant(), generatedBy, lines, discrepancies, names,
                 materials);
+    }
+
+    /**
+     * Aplica sobre un read model en memoria, del más antiguo al más reciente, los eventos de {@code audit_log} de la
+     * organización que alimentan el reporte (despachos, recepciones, discrepancias, obras, almacenes y materiales).
+     */
+    private ReconciliationReadModel replayed(UUID organizationId) {
+        InMemoryReconciliationReadModel readModel = new InMemoryReconciliationReadModel();
+        ReconciliationProjector projector = new ReconciliationProjector(readModel);
+        auditLog.replay(organizationId, ReconciliationProjector.EVENT_TYPES, entry -> projector.apply(entry.action(),
+                entry.organizationId(), entry.aggregateId().toString(), entry.occurredAt(), read(entry.afterValue())));
+        return readModel;
+    }
+
+    private JsonNode read(String value) {
+        try {
+            return value == null ? json.createObjectNode() : json.readTree(value);
+        } catch (IOException ex) {
+            return json.createObjectNode();
+        }
     }
 
     private ReconciliationCriteria criteria(TenantInfo requester, ReconciliationFilter filter) {

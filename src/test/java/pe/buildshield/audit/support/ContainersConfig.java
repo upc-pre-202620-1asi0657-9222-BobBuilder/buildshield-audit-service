@@ -16,7 +16,7 @@ public class ContainersConfig {
     @ServiceConnection
     @ConditionalOnProperty(name = "buildshield.test.external-database", havingValue = "false", matchIfMissing = true)
     PostgreSQLContainer<?> postgres() {
-        return new PostgreSQLContainer<>("postgres:16-alpine");
+        return new PostgreSQLContainer<>("postgres:16-alpine").withInitScript("create-audit-role.sql");
     }
 
     @Bean

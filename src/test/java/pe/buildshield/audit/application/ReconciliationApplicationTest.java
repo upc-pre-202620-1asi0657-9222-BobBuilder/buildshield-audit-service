@@ -43,14 +43,13 @@ class ReconciliationApplicationTest {
 
     private final ObjectMapper json = new ObjectMapper().findAndRegisterModules();
     private final InMemoryAudit store = new InMemoryAudit();
-    private final InMemoryReconciliation readModel = new InMemoryReconciliation();
+    /** Proyección directa de los mismos eventos, para comprobar qué deja cada uno en el read model. */
+    private final InMemoryReconciliationReadModel readModel = new InMemoryReconciliationReadModel();
     private final MutableClock clock = new MutableClock(NOW);
     private final ReconciliationProjector projector = new ReconciliationProjector(readModel);
-    private final AuditCommandService commands = new AuditCommandService(store, store, store, projector, clock);
-    private final ReconciliationQueryService queries = new ReconciliationQueryService(readModel, store, store, clock,
+    private final AuditRecorder commands = new AuditRecorder(store, store, store, clock);
+    private final ReconciliationQueryService queries = new ReconciliationQueryService(store, json, store, store, clock,
             "America/Lima");
-    private final ReconciliationRebuildService rebuild = new ReconciliationRebuildService(store, readModel, projector,
-            json);
     private final ReconciliationExportService exports = new ReconciliationExportService(queries,
             List.of(new FakeRenderer()));
 
@@ -120,7 +119,7 @@ class ReconciliationApplicationTest {
         discrepancy("DiscrepancyResponded", discrepancySur, unknownDispatch, edificioSur, cemento, "RESPONDED",
                 "2026-11-21T09:00:00Z");
         // Otra organización: no aparece en nada.
-        commands.record("buildshield.ordering", new EventEnvelope(UUID.randomUUID(), "DispatchDeparted",
+        commands.record(new EventEnvelope(UUID.randomUUID(), "DispatchDeparted",
                 at("2026-11-05T10:00:00Z"), UUID.randomUUID(), "DISPATCH", "x", null, 1,
                 departurePayload(UUID.randomUUID(), torreNorte, "MAN-X", "2026-11-05T10:00:00Z",
                         line(UUID.randomUUID(), UUID.randomUUID(), cemento, "5"))));
@@ -243,19 +242,16 @@ class ReconciliationApplicationTest {
     }
 
     @Test
-    void rebuilding_from_the_append_only_log_gives_the_same_report() {
+    void the_report_is_built_from_the_append_only_log_without_any_read_model_tables() {
         ReconciliationFilter november = new ReconciliationFilter(null, null, NOV_1, NOV_30);
-        ReconciliationReport before = as(ana, "ADMINISTRATOR", november);
-        readModel.lines.clear();
-        readModel.discrepancies.clear();
-        assertThat(as(ana, "ADMINISTRATOR", november).rows()).isEmpty();
+        int projectedLines = readModel.lines.size();
+        assertThat(projectedLines).isGreaterThan(0);
 
-        int replayed = TenantContext.callAs(new TenantInfo(organization, ana, "ADMINISTRATOR"), rebuild::rebuild);
+        ReconciliationReport first = as(ana, "ADMINISTRATOR", november);
 
-        assertThat(replayed).isEqualTo(17);
-        ReconciliationReport after = as(ana, "ADMINISTRATOR", november);
-        assertThat(after.rows()).isEqualTo(before.rows());
-        assertThat(after.pendingCases()).isEqualTo(before.pendingCases());
+        assertThat(first.rows()).isNotEmpty();
+        assertThat(as(ana, "ADMINISTRATOR", november).rows()).isEqualTo(first.rows());
+        assertThat(store.entries).anySatisfy(entry -> assertThat(entry.action()).isEqualTo("DispatchDeparted"));
     }
 
     @Test
@@ -336,7 +332,7 @@ class ReconciliationApplicationTest {
         projector.apply("OrderRegistered", organization, null, NOW, obj());
         assertThat(readModel.lines).hasSize(lines);
         assertThat(readModel.discrepancies).hasSize(discrepancies);
-        assertThat(projector.handles("OrderRegistered")).isFalse();
+        assertThat(ReconciliationProjector.EVENT_TYPES).doesNotContain("OrderRegistered");
     }
 
     @Test
@@ -362,8 +358,9 @@ class ReconciliationApplicationTest {
     }
 
     private void record(String topic, String type, UUID aggregateId, Instant at, ObjectNode payload) {
-        commands.record(topic, new EventEnvelope(UUID.randomUUID(), type, at, organization, "X",
+        commands.record(new EventEnvelope(UUID.randomUUID(), type, at, organization, "X",
                 aggregateId == null ? null : aggregateId.toString(), null, 1, payload));
+        projector.apply(type, organization, aggregateId == null ? null : aggregateId.toString(), at, payload);
     }
 
     private void assign(UUID user, UUID location, String type) {

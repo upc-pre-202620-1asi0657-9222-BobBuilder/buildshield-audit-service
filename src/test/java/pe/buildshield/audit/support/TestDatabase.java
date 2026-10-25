@@ -13,8 +13,7 @@ import java.util.List;
 public final class TestDatabase {
 
     public static final List<String> TABLES = List.of("audit_log", "user_projection", "assignment_projection",
-            "processed_events", "location_projection", "material_projection", "reconciliation_line",
-            "reconciliation_discrepancy");
+            "processed_events");
 
     private TestDatabase() {
     }

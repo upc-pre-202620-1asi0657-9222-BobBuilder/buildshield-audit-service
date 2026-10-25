@@ -17,8 +17,11 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
-/** Read model de conciliación en memoria, con las mismas reglas de filtro que la consulta JDBC. */
-class InMemoryReconciliation implements ReconciliationReadModel {
+/**
+ * Read model de conciliación en memoria. Cada reporte arma uno nuevo aplicando, en orden, los eventos de
+ * {@code audit_log} que lo alimentan, así que no hay tablas que mantener ni reconstruir.
+ */
+class InMemoryReconciliationReadModel implements ReconciliationReadModel {
 
     record Owned<T>(UUID organizationId, T value) {
     }
@@ -64,14 +67,6 @@ class InMemoryReconciliation implements ReconciliationReadModel {
     @Override
     public void saveDiscrepancy(UUID organizationId, DiscrepancyCase discrepancy, Instant at) {
         discrepancies.put(discrepancy.discrepancyId(), new Owned<>(organizationId, discrepancy));
-    }
-
-    @Override
-    public void clear(UUID organizationId) {
-        locations.values().removeIf(o -> o.organizationId().equals(organizationId));
-        materials.values().removeIf(o -> o.organizationId().equals(organizationId));
-        lines.values().removeIf(o -> o.organizationId().equals(organizationId));
-        discrepancies.values().removeIf(o -> o.organizationId().equals(organizationId));
     }
 
     @Override

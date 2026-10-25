@@ -33,26 +33,25 @@ public class OutboxWriter {
 
     /** Organización y actor del {@code TenantContext} de la operación en curso. */
     @Transactional(propagation = Propagation.MANDATORY)
-    public UUID append(String eventType, String aggregateType, Object aggregateId, Object payload) {
+    public UUID append(String eventType, Object aggregateId, Object payload) {
         TenantInfo tenant = TenantContext.require();
         UUID actor = TenantContext.SYSTEM_USER_ID.equals(tenant.userId()) ? null : tenant.userId();
-        return append(tenant.organizationId(), actor, eventType, aggregateType, aggregateId, payload);
+        return append(tenant.organizationId(), actor, eventType, aggregateId, payload);
     }
 
     /** Organización y actor explícitos (por ejemplo, al registrar una organización nueva). */
     @Transactional(propagation = Propagation.MANDATORY)
-    public UUID append(UUID organizationId, UUID actorId, String eventType, String aggregateType, Object aggregateId,
+    public UUID append(UUID organizationId, UUID actorId, String eventType, Object aggregateId,
             Object payload) {
         Objects.requireNonNull(organizationId, "organizationId");
         Objects.requireNonNull(eventType, "eventType");
-        Objects.requireNonNull(aggregateType, "aggregateType");
         Objects.requireNonNull(aggregateId, "aggregateId");
         UUID eventId = UUID.randomUUID();
         jdbc.update("""
-                INSERT INTO outbox_events (id, event_type, aggregate_type, aggregate_id, organization_id, actor_id,
-                    correlation_id, payload, occurred_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, CAST(? AS jsonb), ?)
-                """, eventId, eventType, aggregateType, aggregateId.toString(), organizationId, actorId,
+                INSERT INTO outbox_events (id, event_type, aggregate_id, organization_id, actor_id, correlation_id,
+                    payload, occurred_at)
+                VALUES (?, ?, ?, ?, ?, ?, CAST(? AS jsonb), ?)
+                """, eventId, eventType, UUID.fromString(aggregateId.toString()), organizationId, actorId,
                 MDC.get(CorrelationId.MDC_KEY), json.valueToTree(payload).toString(), Timestamp.from(clock.instant()));
         return eventId;
     }

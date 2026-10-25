@@ -80,26 +80,29 @@ class AuditMessagingIT {
 
         await().atMost(Duration.ofSeconds(30)).until(() -> count(organization) == 6);
         await().pollDelay(Duration.ofSeconds(1)).atMost(Duration.ofSeconds(5)).until(() -> count(organization) == 6);
-        assertThat(jdbc.queryForList("SELECT DISTINCT topic FROM audit_log WHERE organization_id = ?", String.class,
-                organization)).containsExactlyInAnyOrder("buildshield.iam", "buildshield.organization",
-                "buildshield.inventory", "buildshield.ordering", "buildshield.discrepancy", "buildshield.subscription");
+        assertThat(jdbc.queryForList("SELECT action FROM audit_log WHERE organization_id = ? ORDER BY id",
+                String.class, organization)).containsExactlyInAnyOrder("UserCreated", "StaffAssigned",
+                "StockReserved", "DispatchDeparted", "DiscrepancyOpened", "SubscriptionActivated");
+        assertThat(jdbc.queryForList("SELECT DISTINCT consumer FROM processed_events", String.class))
+                .containsExactly("AuditEventConsumer");
         assertThat(jdbc.queryForObject("SELECT full_name FROM user_projection WHERE user_id = ?", String.class, user))
                 .isEqualTo("Rosa Quispe");
         assertThat(jdbc.queryForObject("SELECT location_id FROM assignment_projection WHERE assignment_id = ?",
                 UUID.class, assignment)).isEqualTo(worksite);
-        assertThat(jdbc.queryForObject("SELECT payload ->> 'campoNuevo' FROM audit_log WHERE event_type = ?",
+        assertThat(jdbc.queryForObject("SELECT after_value ->> 'campoNuevo' FROM audit_log WHERE action = ?",
                 String.class, "DispatchDeparted")).isEqualTo("1");
 
         var page = TenantContext.callAs(new TenantInfo(organization, UUID.randomUUID(), "ADMINISTRATOR"),
-                () -> queries.search(new AuditFilter(null, "DISPATCH", dispatch.toString(), null, null, null, null,
-                        0, 10)));
+                () -> queries.search(new AuditFilter(null, "DISPATCH", dispatch, null, null, null, 0, 10)));
         assertThat(page.total()).isEqualTo(1);
         assertThat(page.items().get(0).actorName()).isEqualTo("Rosa Quispe");
-        var byTopic = TenantContext.callAs(new TenantInfo(organization, UUID.randomUUID(), "ADMINISTRATOR"),
-                () -> queries.search(new AuditFilter(null, null, null, user, "buildshield.discrepancy",
+        var byUserAndDate = TenantContext.callAs(new TenantInfo(organization, UUID.randomUUID(), "ADMINISTRATOR"),
+                () -> queries.search(new AuditFilter("DiscrepancyOpened", null, null, user,
                         Instant.now().minusSeconds(3600), Instant.now().plusSeconds(3600), 0, 10)));
-        assertThat(byTopic.total()).isEqualTo(1);
-        assertThat(byTopic.items().get(0).entry().eventType()).isEqualTo("DiscrepancyOpened");
+        assertThat(byUserAndDate.total()).isEqualTo(1);
+        assertThat(byUserAndDate.items().get(0).entry().action()).isEqualTo("DiscrepancyOpened");
+        assertThat(TenantContext.callAs(new TenantInfo(organization, UUID.randomUUID(), "ADMINISTRATOR"),
+                queries::verify).valid()).isTrue();
     }
 
     private long count(UUID organization) {

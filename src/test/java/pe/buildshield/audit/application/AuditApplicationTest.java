@@ -5,7 +5,9 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import pe.buildshield.audit.domain.model.AuditEntry;
 import pe.buildshield.audit.domain.model.AuditFilter;
+import pe.buildshield.audit.domain.model.ChainVerification;
 import pe.buildshield.audit.domain.model.CustodyEventType;
 import pe.buildshield.audit.shared.error.ResourceNotFoundException;
 import pe.buildshield.audit.shared.messaging.EventEnvelope;
@@ -27,8 +29,7 @@ class AuditApplicationTest {
     private final ObjectMapper json = new ObjectMapper().findAndRegisterModules();
     private final InMemoryAudit store = new InMemoryAudit();
     private final MutableClock clock = new MutableClock(T0);
-    private final AuditCommandService commands = new AuditCommandService(store, store, store,
-            new ReconciliationProjector(new InMemoryReconciliation()), clock);
+    private final AuditRecorder commands = new AuditRecorder(store, store, store, clock);
     private final AuditQueryService queries = new AuditQueryService(store, store);
     private final CustodyQueryService custody = new CustodyQueryService(store, store, store, json);
 
@@ -48,57 +49,114 @@ class AuditApplicationTest {
     void every_event_is_recorded_once_including_unknown_types() {
         EventEnvelope unknown = event("SomethingNew", "X", "1", null, T0, payload());
 
-        assertThat(commands.record("buildshield.inventory", unknown)).isTrue();
-        assertThat(commands.record("buildshield.inventory", unknown)).isFalse();
+        assertThat(commands.record(unknown)).isTrue();
+        assertThat(commands.record(unknown)).isFalse();
         assertThat(store.entries).hasSize(1);
-        assertThat(store.entries.get(0).topic()).isEqualTo("buildshield.inventory");
-        assertThat(store.entries.get(0).recordedAt()).isEqualTo(T0);
+        assertThat(store.entries.get(0).action()).isEqualTo("SomethingNew");
+        assertThat(store.entries.get(0).aggregateType()).isEqualTo("X");
 
         EventEnvelope withoutPayloadOrDate = new EventEnvelope(UUID.randomUUID(), "Bare", null, organization, null,
                 null, null, 1, null);
-        assertThat(commands.record("buildshield.iam", withoutPayloadOrDate)).isTrue();
-        assertThat(store.entries.get(1).payload()).isEqualTo("{}");
+        assertThat(commands.record(withoutPayloadOrDate)).isTrue();
+        assertThat(store.entries.get(1).afterValue()).isEqualTo("{}");
+        assertThat(store.entries.get(1).aggregateType()).isEqualTo("UNKNOWN");
+        assertThat(store.entries.get(1).actorUserId()).isEqualTo(AuditEntry.SYSTEM_USER_ID);
         assertThat(store.entries.get(1).occurredAt()).isEqualTo(T0);
     }
 
     @Test
     void user_and_assignment_events_keep_the_local_copies_up_to_date() {
-        commands.record("buildshield.iam", event("UserCreated", "USER", rosa.toString(), null, T0,
+        commands.record(event("UserCreated", "USER", rosa.toString(), null, T0,
                 payload("userId", rosa.toString(), "fullName", "Rosa Quispe", "role", "WAREHOUSE_MANAGER")));
-        commands.record("buildshield.iam", event("UserUpdated", "USER", "x", null, T0, payload("userId", "no-uuid")));
+        commands.record(event("UserUpdated", "USER", "x", null, T0, payload("userId", "no-uuid")));
         UUID assignment = UUID.randomUUID();
-        commands.record("buildshield.organization", event("StaffAssigned", "ASSIGNMENT", assignment.toString(), null,
+        commands.record(event("StaffAssigned", "ASSIGNMENT", assignment.toString(), null,
                 T0, payload("assignmentId", assignment.toString(), "userId", luis.toString(), "locationId",
                         worksite.toString(), "locationType", "WORKSITE")));
-        commands.record("buildshield.organization", event("StaffAssigned", "ASSIGNMENT", "y", null, T0,
+        commands.record(event("StaffAssigned", "ASSIGNMENT", "y", null, T0,
                 payload("assignmentId", UUID.randomUUID().toString())));
 
         assertThat(store.names(organization, List.of(rosa))).containsEntry(rosa, "Rosa Quispe");
         assertThat(store.isAssigned(organization, luis, worksite)).isTrue();
 
-        commands.record("buildshield.organization", event("StaffUnassigned", "ASSIGNMENT", assignment.toString(),
+        commands.record(event("StaffUnassigned", "ASSIGNMENT", assignment.toString(),
                 null, T0, payload("assignmentId", assignment.toString())));
-        commands.record("buildshield.organization", event("StaffUnassigned", "ASSIGNMENT", "z", null, T0, payload()));
+        commands.record(event("StaffUnassigned", "ASSIGNMENT", "z", null, T0, payload()));
         assertThat(store.isAssigned(organization, luis, worksite)).isFalse();
         assertThat(store.entries).hasSize(6);
     }
 
     @Test
     void search_returns_the_organization_events_with_the_actor_name() {
-        commands.record("buildshield.iam", event("UserCreated", "USER", rosa.toString(), null, T0,
+        commands.record(event("UserCreated", "USER", rosa.toString(), null, T0,
                 payload("userId", rosa.toString(), "fullName", "Rosa Quispe", "role", "WAREHOUSE_MANAGER")));
-        commands.record("buildshield.ordering", event("DispatchDeparted", "DISPATCH", dispatch.toString(), rosa,
+        commands.record(event("DispatchDeparted", "DISPATCH", dispatch.toString(), rosa,
                 T0.plusSeconds(60), payload("dispatchId", dispatch.toString())));
-        commands.record("buildshield.ordering", new EventEnvelope(UUID.randomUUID(), "DispatchDeparted", T0,
+        commands.record(new EventEnvelope(UUID.randomUUID(), "DispatchDeparted", T0,
                 otherOrganization, "DISPATCH", "x", null, 1, payload()));
 
         var page = TenantContext.callAs(user("ADMINISTRATOR", UUID.randomUUID()), () -> queries.search(
-                new AuditFilter(null, null, null, null, null, null, null, 0, 10)));
+                new AuditFilter(null, null, null, null, null, null, 0, 10)));
 
         assertThat(page.total()).isEqualTo(2);
-        assertThat(page.items().get(0).entry().eventType()).isEqualTo("DispatchDeparted");
+        assertThat(page.items().get(0).entry().action()).isEqualTo("DispatchDeparted");
         assertThat(page.items().get(0).actorName()).isEqualTo("Rosa Quispe");
         assertThat(page.items().get(1).actorName()).isNull();
+    }
+
+    @Test
+    void every_entry_is_chained_to_the_previous_one_of_its_organization() {
+        commands.record(event("UserCreated", "USER", rosa.toString(), null, T0, payload("userId", rosa.toString())));
+        commands.record(event("DispatchDeparted", "DISPATCH", dispatch.toString(), rosa, T0.plusSeconds(5),
+                payload("dispatchId", dispatch.toString())));
+        commands.record(new EventEnvelope(UUID.randomUUID(), "DispatchDeparted", T0, otherOrganization, "DISPATCH",
+                dispatch.toString(), null, 1, payload()));
+
+        AuditEntry first = store.entries.get(0);
+        AuditEntry second = store.entries.get(1);
+        AuditEntry otherFirst = store.entries.get(2);
+
+        assertThat(first.prevHash()).isEqualTo(AuditEntry.GENESIS_HASH).hasSize(64);
+        assertThat(second.prevHash()).isEqualTo(first.hash());
+        assertThat(otherFirst.prevHash()).isEqualTo(AuditEntry.GENESIS_HASH);
+        assertThat(store.entries).allSatisfy(entry -> assertThat(entry.hashMatches()).isTrue());
+        assertThat(TenantContext.callAs(user("ADMINISTRATOR", rosa), queries::verify))
+                .isEqualTo(new ChainVerification(true, 2, null, null));
+    }
+
+    @Test
+    void verify_finds_an_altered_entry() {
+        for (int i = 0; i < 4; i++) {
+            commands.record(event("DispatchDeparted", "DISPATCH", dispatch.toString(), rosa, T0.plusSeconds(i),
+                    payload("dispatchId", dispatch.toString(), "n", String.valueOf(i))));
+        }
+        AuditEntry original = store.entries.get(2);
+        store.entries.set(2, new AuditEntry(original.id(), original.eventId(), original.organizationId(),
+                original.aggregateType(), original.aggregateId(), original.action(), original.actorUserId(),
+                original.occurredAt(), original.beforeValue(), "{\"dispatchId\":\"" + dispatch + "\",\"n\":\"9\"}",
+                original.prevHash(), original.hash()));
+
+        ChainVerification result = TenantContext.callAs(user("ADMINISTRATOR", rosa), queries::verify);
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.brokenEntryId()).isEqualTo(original.id());
+        assertThat(result.entriesChecked()).isEqualTo(3);
+        assertThat(result.reason()).contains("alterada");
+    }
+
+    @Test
+    void verify_finds_a_removed_entry() {
+        for (int i = 0; i < 4; i++) {
+            commands.record(event("DispatchDeparted", "DISPATCH", dispatch.toString(), rosa, T0.plusSeconds(i),
+                    payload("n", String.valueOf(i))));
+        }
+        AuditEntry removed = store.entries.remove(1);
+
+        ChainVerification result = TenantContext.callAs(user("ADMINISTRATOR", rosa), queries::verify);
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.brokenEntryId()).isEqualTo(removed.id() + 1);
+        assertThat(result.reason()).contains("no sigue a la entrada anterior");
     }
 
     @Test
@@ -137,34 +195,34 @@ class AuditApplicationTest {
                 () -> custody.custody(UUID.randomUUID()))).isInstanceOf(ResourceNotFoundException.class);
 
         UUID onlyStock = UUID.randomUUID();
-        commands.record("buildshield.inventory", event("StockDeducted", "STOCK", "s", null, T0,
+        commands.record(event("StockDeducted", "STOCK", "s", null, T0,
                 payload("dispatchId", onlyStock.toString())));
         assertThatThrownBy(() -> TenantContext.callAs(user("ADMINISTRATOR", rosa), () -> custody.custody(onlyStock)))
                 .isInstanceOf(ResourceNotFoundException.class);
     }
 
     private void recordTimeline() {
-        commands.record("buildshield.iam", event("UserCreated", "USER", rosa.toString(), null, T0,
+        commands.record(event("UserCreated", "USER", rosa.toString(), null, T0,
                 payload("userId", rosa.toString(), "fullName", "Rosa Quispe", "role", "WAREHOUSE_MANAGER")));
         ObjectNode prepared = payload("dispatchId", dispatch.toString(), "worksiteId", worksite.toString(),
                 "manifestCode", "MAN-0001");
         prepared.putArray("lines").addObject().put("materialId", "a");
         prepared.withArray("lines").addObject().put("materialId", "b");
-        commands.record("buildshield.ordering", event("DispatchPrepared", "DISPATCH", dispatch.toString(), rosa, T0,
+        commands.record(event("DispatchPrepared", "DISPATCH", dispatch.toString(), rosa, T0,
                 prepared));
-        commands.record("buildshield.ordering", event("DispatchDeparted", "DISPATCH", dispatch.toString(), rosa,
+        commands.record(event("DispatchDeparted", "DISPATCH", dispatch.toString(), rosa,
                 T0.plusSeconds(3600), payload("dispatchId", dispatch.toString(), "worksiteId", worksite.toString())));
-        commands.record("buildshield.ordering", event("TransitIncidentReported", "DISPATCH", dispatch.toString(), rosa,
+        commands.record(event("TransitIncidentReported", "DISPATCH", dispatch.toString(), rosa,
                 T0.plusSeconds(4000), payload("dispatchId", dispatch.toString(), "type", "DELAY", "observation",
                         "Tráfico en la Panamericana")));
         ObjectNode confirmed = payload("dispatchId", dispatch.toString(), "receptionId", UUID.randomUUID().toString());
         confirmed.putArray("lines").addObject().put("withinTolerance", false);
         confirmed.withArray("lines").addObject().put("withinTolerance", true);
-        commands.record("buildshield.ordering", event("ReceptionConfirmed", "RECEPTION", "r", luis,
+        commands.record(event("ReceptionConfirmed", "RECEPTION", "r", luis,
                 T0.plusSeconds(9000), confirmed));
-        commands.record("buildshield.inventory", event("StockReceived", "STOCK", "s", null, T0.plusSeconds(9001),
+        commands.record(event("StockReceived", "STOCK", "s", null, T0.plusSeconds(9001),
                 payload("dispatchId", dispatch.toString())));
-        commands.record("buildshield.discrepancy", event("DiscrepancyOpened", "DISCREPANCY", "d", luis,
+        commands.record(event("DiscrepancyOpened", "DISCREPANCY", "d", luis,
                 T0.plusSeconds(9002), payload("dispatchId", dispatch.toString(), "materialName", "Cemento",
                         "text", "Faltan 3 bolsas")));
     }

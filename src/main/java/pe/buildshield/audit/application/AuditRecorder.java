@@ -3,63 +3,72 @@ package pe.buildshield.audit.application;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import pe.buildshield.audit.domain.model.AssignmentDirectory;
-import pe.buildshield.audit.domain.model.AuditEntry;
+import pe.buildshield.audit.domain.model.NewAuditEntry;
 import pe.buildshield.audit.domain.model.AuditLogRepository;
 import pe.buildshield.audit.domain.model.UserDirectory;
-import pe.buildshield.audit.shared.correlation.CorrelationId;
 import pe.buildshield.audit.shared.messaging.EventEnvelope;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.UUID;
 
 /**
- * Registra cada evento de integración en el registro de solo anexado y mantiene las copias locales que la
- * custodia necesita (usuarios y asignaciones) y el read model de conciliación (US47), en la misma transacción.
- * Cualquier tipo de evento se registra, también los desconocidos.
+ * Registra cada acción relevante como entrada de la bitácora de auditoría (componente Audit Recorder del C4) y
+ * mantiene las copias locales que la custodia necesita (usuarios y asignaciones), en la misma transacción. Cualquier
+ * tipo de evento se registra, también los desconocidos. El estado posterior de la entrada ({@code after_value}) es el
+ * payload del evento; los eventos no informan el estado anterior ({@code before_value} queda vacío).
  */
 @Service
-public class AuditCommandService {
+public class AuditRecorder {
 
-    private static final Logger log = LoggerFactory.getLogger(AuditCommandService.class);
+    private static final Logger log = LoggerFactory.getLogger(AuditRecorder.class);
 
     private final AuditLogRepository auditLog;
     private final UserDirectory users;
     private final AssignmentDirectory assignments;
-    private final ReconciliationProjector reconciliation;
     private final Clock clock;
 
-    public AuditCommandService(AuditLogRepository auditLog, UserDirectory users, AssignmentDirectory assignments,
-            ReconciliationProjector reconciliation, Clock clock) {
+    public AuditRecorder(AuditLogRepository auditLog, UserDirectory users, AssignmentDirectory assignments,
+            Clock clock) {
         this.auditLog = auditLog;
         this.users = users;
         this.assignments = assignments;
-        this.reconciliation = reconciliation;
         this.clock = clock;
     }
 
     /** @return {@code false} si el evento ya estaba en el registro */
     @Transactional
-    public boolean record(String topic, EventEnvelope event) {
+    public boolean record(EventEnvelope event) {
         JsonNode payload = event.payload() == null || event.payload().isNull()
                 ? com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode() : event.payload();
         Instant occurredAt = event.occurredAt() == null ? clock.instant() : event.occurredAt();
-        boolean appended = auditLog.append(new AuditEntry(UUID.randomUUID(), event.eventId(), topic, event.eventType(),
-                event.aggregateType(), event.aggregateId(), event.organizationId(), event.actorId(), occurredAt,
-                clock.instant(), MDC.get(CorrelationId.MDC_KEY), payload.toString()));
+        boolean appended = auditLog.append(new NewAuditEntry(event.eventId(), event.organizationId(),
+                event.aggregateType() == null ? "UNKNOWN" : event.aggregateType(),
+                aggregateId(event), event.eventType(), event.actorId(), occurredAt, null, payload.toString()))
+                .isPresent();
         if (!appended) {
             log.debug("Evento {} ya registrado", event.eventId());
             return false;
         }
         updateCopies(event, payload);
-        if (reconciliation.handles(event.eventType())) {
-            reconciliation.apply(event.eventType(), event.organizationId(), event.aggregateId(), occurredAt, payload);
-        }
         return true;
+    }
+
+    /** El sobre manda un uuid; si llega otra cosa se deriva uno estable del texto para no perder el evento. */
+    static UUID aggregateId(EventEnvelope event) {
+        String id = event.aggregateId();
+        if (id == null || id.isBlank()) {
+            return event.eventId();
+        }
+        try {
+            return UUID.fromString(id);
+        } catch (IllegalArgumentException ex) {
+            return UUID.nameUUIDFromBytes(id.getBytes(StandardCharsets.UTF_8));
+        }
     }
 
     private void updateCopies(EventEnvelope event, JsonNode payload) {

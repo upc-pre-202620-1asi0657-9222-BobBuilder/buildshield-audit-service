@@ -6,10 +6,11 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import pe.buildshield.audit.application.AuditQueryService;
+import pe.buildshield.audit.application.CustodyExportService;
 import pe.buildshield.audit.application.CustodyQueryService;
+import pe.buildshield.audit.domain.model.ChainVerification;
 import pe.buildshield.audit.application.ReconciliationExportService;
 import pe.buildshield.audit.application.ReconciliationQueryService;
-import pe.buildshield.audit.application.ReconciliationRebuildService;
 import pe.buildshield.audit.domain.model.reconciliation.ReconciliationReport;
 import pe.buildshield.audit.shared.security.JwtTokenIssuer;
 import pe.buildshield.audit.shared.security.RevokedTokenStore;
@@ -21,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
@@ -61,7 +63,7 @@ class RoleAuthorizationTest {
     ReconciliationExportService exports;
 
     @MockitoBean
-    ReconciliationRebuildService rebuild;
+    CustodyExportService custodyExports;
 
     @Test
     void every_role_reads_and_exports_the_reconciliation_report() throws Exception {
@@ -88,18 +90,41 @@ class RoleAuthorizationTest {
     }
 
     @Test
-    void only_the_administrator_rebuilds_the_reconciliation_read_model() throws Exception {
-        when(rebuild.rebuild()).thenReturn(12);
+    void only_the_administrator_verifies_the_hash_chain() throws Exception {
+        when(audit.verify()).thenReturn(new ChainVerification(true, 12, null, null));
 
+        mvc.perform(get("/api/v1/audit/verify").header("Authorization", bearer("ADMINISTRATOR")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.valid").value(true))
+                .andExpect(jsonPath("$.entriesChecked").value(12));
+        mvc.perform(get("/api/v1/audit/verify").header("Authorization", bearer("WAREHOUSE_MANAGER")))
+                .andExpect(status().isForbidden());
+        mvc.perform(get("/api/v1/audit/verify").header("Authorization", bearer("SITE_MANAGER")))
+                .andExpect(status().isForbidden());
+        mvc.perform(get("/api/v1/audit/verify")).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void the_rebuild_endpoint_no_longer_exists() throws Exception {
         mvc.perform(post("/api/v1/audit/reports/reconciliation/rebuild")
                         .header("Authorization", bearer("ADMINISTRATOR")))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.eventsReplayed").value(12));
-        mvc.perform(post("/api/v1/audit/reports/reconciliation/rebuild")
-                        .header("Authorization", bearer("WAREHOUSE_MANAGER")))
-                .andExpect(status().isForbidden());
-        mvc.perform(post("/api/v1/audit/reports/reconciliation/rebuild")
-                        .header("Authorization", bearer("SITE_MANAGER")))
-                .andExpect(status().isForbidden());
+                .andExpect(status().is4xxClientError());
+    }
+
+    @Test
+    void every_role_exports_the_custody_pdf_and_anonymous_users_do_not() throws Exception {
+        UUID dispatch = UUID.randomUUID();
+        when(custodyExports.export(dispatch)).thenReturn(new CustodyExportService.ExportedFile(
+                "custodia-MAN-1-20261201-0905.pdf", "application/pdf", "%PDF-".getBytes()));
+
+        for (String role : List.of("ADMINISTRATOR", "WAREHOUSE_MANAGER", "SITE_MANAGER")) {
+            mvc.perform(get("/api/v1/dispatches/" + dispatch + "/custody").param("format", "pdf")
+                            .header("Authorization", bearer(role)))
+                    .andExpect(status().isOk())
+                    .andExpect(header().string("Content-Type", "application/pdf"))
+                    .andExpect(header().string("Content-Disposition", containsString("custodia-MAN-1-")));
+        }
+        mvc.perform(get("/api/v1/dispatches/" + dispatch + "/custody").param("format", "pdf"))
+                .andExpect(status().isUnauthorized());
     }
 
     @Test

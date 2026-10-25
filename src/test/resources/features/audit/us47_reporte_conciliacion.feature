@@ -33,13 +33,6 @@ Característica: US47 Reporte de conciliación por obra y periodo
     Cuando "Ana Torres" consulta la conciliación del "2026-11-11" al "2026-11-30"
     Entonces el reporte tiene 1 despacho y solo de "Edificio Sur"
 
-  Escenario: El read model se reconstruye desde el registro de solo anexado
-    Dado que el read model de conciliación se borró
-    Cuando "Ana Torres" reconstruye el read model de conciliación
-    Entonces se volvieron a aplicar 9 eventos
+  Escenario: El reporte se arma desde el registro de solo anexado
     Cuando "Ana Torres" consulta la conciliación de "Torre Norte" del "2026-11-01" al "2026-11-30"
     Entonces la fila de "CEM-001" en "Torre Norte" muestra despachado "70", recibido "47", por recibir "20", merma "3" y merma "6.00" %
-
-  Escenario: Solo el administrador reconstruye el read model
-    Cuando "Rosa Quispe" reconstruye el read model de conciliación
-    Entonces la respuesta tiene estado 403

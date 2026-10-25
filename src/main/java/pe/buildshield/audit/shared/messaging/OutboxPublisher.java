@@ -69,12 +69,12 @@ public class OutboxPublisher {
         try {
             Integer sent = transactionTemplate.execute(status -> {
                 List<PendingEvent> pending = jdbc.query("""
-                        SELECT id, event_type, aggregate_type, aggregate_id, organization_id, actor_id, correlation_id,
+                        SELECT id, event_type, aggregate_id, organization_id, actor_id, correlation_id,
                                payload, occurred_at
                         FROM outbox_events WHERE published_at IS NULL
                         ORDER BY occurred_at, id LIMIT ? FOR UPDATE SKIP LOCKED
                         """, (rs, row) -> new PendingEvent(rs.getObject("id", UUID.class), rs.getString("event_type"),
-                        rs.getString("aggregate_type"), rs.getString("aggregate_id"),
+                        rs.getObject("aggregate_id", UUID.class).toString(),
                         rs.getObject("organization_id", UUID.class), rs.getObject("actor_id", UUID.class),
                         rs.getString("correlation_id"), rs.getString("payload"),
                         rs.getTimestamp("occurred_at").toInstant()), batchSize);
@@ -93,11 +93,26 @@ public class OutboxPublisher {
         }
     }
 
+    /**
+     * Tipo de agregado del sobre. {@code outbox_events} no lo guarda: se deduce del tipo de evento. Por defecto es el
+     * nombre del evento sin su último término ({@code OrderApproved} es {@code Order}); el publicador de cada servicio
+     * lo reemplaza cuando el nombre del evento no basta.
+     */
+    protected String aggregateTypeOf(String eventType) {
+        int lastWord = 0;
+        for (int i = 1; i < eventType.length(); i++) {
+            if (Character.isUpperCase(eventType.charAt(i))) {
+                lastWord = i;
+            }
+        }
+        return lastWord == 0 ? eventType : eventType.substring(0, lastWord);
+    }
+
     private void send(PendingEvent event) {
         String value;
         try {
             value = json.writeValueAsString(new EventEnvelope(event.id(), event.eventType(), event.occurredAt(),
-                    event.organizationId(), event.aggregateType(), event.aggregateId(), event.actorId(),
+                    event.organizationId(), aggregateTypeOf(event.eventType()), event.aggregateId(), event.actorId(),
                     EventEnvelope.CURRENT_VERSION, json.readTree(event.payload())));
         } catch (JsonProcessingException ex) {
             throw new IllegalStateException("Evento " + event.id() + " con payload inválido", ex);
@@ -117,7 +132,7 @@ public class OutboxPublisher {
         }
     }
 
-    private record PendingEvent(UUID id, String eventType, String aggregateType, String aggregateId,
+    private record PendingEvent(UUID id, String eventType, String aggregateId,
             UUID organizationId, UUID actorId, String correlationId, String payload, Instant occurredAt) {
     }
 }

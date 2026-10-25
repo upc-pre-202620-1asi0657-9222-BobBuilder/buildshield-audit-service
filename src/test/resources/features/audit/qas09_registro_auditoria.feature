@@ -21,3 +21,20 @@ Característica: QAS09 Auditabilidad: registro de solo anexado de los eventos
   Escenario: Solo el administrador consulta el registro
     Cuando "Rosa Quispe" consulta el registro de auditoría
     Entonces la respuesta tiene estado 403
+
+  Escenario: Cada entrada del registro queda encadenada a la anterior con una huella SHA-256
+    Cuando "Ana Torres" consulta el registro de auditoría
+    Entonces cada entrada del registro está encadenada a la anterior
+
+  Escenario: La verificación de la cadena confirma que ninguna entrada fue alterada
+    Cuando "Ana Torres" verifica la cadena de huellas del registro de auditoría
+    Entonces la cadena es válida y revisó 4 entradas
+
+  Escenario: La verificación delata una entrada alterada por fuera de la aplicación
+    Dado que alguien altera directamente la entrada 2 del registro de auditoría
+    Cuando "Ana Torres" verifica la cadena de huellas del registro de auditoría
+    Entonces la cadena está rota en la entrada 2
+
+  Escenario: Solo el administrador verifica la cadena
+    Cuando "Rosa Quispe" verifica la cadena de huellas del registro de auditoría
+    Entonces la respuesta tiene estado 403

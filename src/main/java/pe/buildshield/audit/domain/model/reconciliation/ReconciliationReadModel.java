@@ -9,7 +9,7 @@ import java.util.UUID;
 
 /**
  * Read model del reporte de conciliación (US47): copias de obras, almacenes y materiales, líneas de despacho y
- * discrepancias. Es derivado del registro de solo anexado: se puede vaciar y reconstruir. Toda operación va acotada a
+ * discrepancias. Se arma al consultar, aplicando sobre una copia en memoria los eventos de {@code audit_log}. Toda operación va acotada a
  * la organización.
  */
 public interface ReconciliationReadModel {
@@ -27,9 +27,6 @@ public interface ReconciliationReadModel {
     Optional<DiscrepancyCase> findDiscrepancy(UUID organizationId, UUID discrepancyId);
 
     void saveDiscrepancy(UUID organizationId, DiscrepancyCase discrepancy, Instant at);
-
-    /** Borra todo lo de la organización antes de reconstruirlo desde el registro. */
-    void clear(UUID organizationId);
 
     /** Líneas no anuladas que cumplen el criterio. */
     List<ReconciliationLine> findLines(UUID organizationId, ReconciliationCriteria criteria);

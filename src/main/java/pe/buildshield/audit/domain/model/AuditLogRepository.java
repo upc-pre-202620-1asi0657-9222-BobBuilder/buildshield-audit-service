@@ -6,11 +6,16 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Consumer;
 
-/** Registro de solo anexado: no hay operaciones para cambiar ni borrar entradas. */
+/** Bitácora de solo anexado: no hay operaciones para cambiar ni borrar entradas. */
 public interface AuditLogRepository {
 
-    /** @return {@code false} si el evento ya estaba registrado (mismo eventId) */
-    boolean append(AuditEntry entry);
+    /**
+     * Anexa la acción al final de la cadena de su organización. Las acciones de una misma organización se anexan de
+     * una en una; el mismo evento no entra dos veces.
+     *
+     * @return la entrada guardada, con su id y su huella; vacío si el evento ya estaba registrado
+     */
+    Optional<AuditEntry> append(NewAuditEntry entry);
 
     AuditPage search(UUID organizationId, AuditFilter filter);
 
@@ -21,10 +26,17 @@ public interface AuditLogRepository {
     Optional<UUID> findDispatchWorksite(UUID organizationId, UUID dispatchId);
 
     /**
-     * Recorre, del más antiguo al más reciente, los eventos de la organización de esos tipos (reconstrucción de los
-     * read models).
+     * Recorre, del más antiguo al más reciente, las entradas de la organización con esas acciones (el reporte de
+     * conciliación se arma con ellas).
      *
-     * @return cuántos eventos recorrió
+     * @return cuántas entradas recorrió
      */
-    int replay(UUID organizationId, Collection<String> eventTypes, Consumer<AuditEntry> action);
+    int replay(UUID organizationId, Collection<String> actions, Consumer<AuditEntry> consumer);
+
+    /**
+     * Recorre toda la cadena de la organización en el orden en que se anexó, sin cargarla entera en memoria.
+     *
+     * @return cuántas entradas recorrió
+     */
+    int forEachInChainOrder(UUID organizationId, Consumer<AuditEntry> consumer);
 }

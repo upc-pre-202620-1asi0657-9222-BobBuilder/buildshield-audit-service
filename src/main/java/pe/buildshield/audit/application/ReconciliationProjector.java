@@ -1,7 +1,6 @@
 package pe.buildshield.audit.application;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import org.springframework.stereotype.Component;
 import pe.buildshield.audit.domain.model.reconciliation.DiscrepancyCase;
 import pe.buildshield.audit.domain.model.reconciliation.LineStatus;
 import pe.buildshield.audit.domain.model.reconciliation.MaterialInfo;
@@ -16,19 +15,17 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
-import static pe.buildshield.audit.application.AuditCommandService.text;
-import static pe.buildshield.audit.application.AuditCommandService.uuid;
+import static pe.buildshield.audit.application.AuditRecorder.text;
+import static pe.buildshield.audit.application.AuditRecorder.uuid;
 
 /**
- * Proyecta los eventos de ordering, discrepancy y organization sobre el read model de conciliación (US47). Lo usan el
- * consumo en vivo (misma transacción que el registro del evento) y la reconstrucción desde {@code audit_log}, así que
- * aplicar los mismos eventos en el mismo orden deja siempre el mismo resultado. Tolera campos ausentes: lo que no puede
- * ubicar lo ignora.
+ * Proyecta los eventos de ordering, discrepancy y organization sobre un read model de conciliación (US47). Se crea uno
+ * por reporte y se le aplican, del más antiguo al más reciente, los eventos de {@code audit_log}: aplicar los mismos
+ * eventos en el mismo orden deja siempre el mismo resultado. Tolera campos ausentes: lo que no puede ubicar lo ignora.
  */
-@Component
 public class ReconciliationProjector {
 
-    /** Tipos de evento que alimentan el reporte; la reconstrucción solo recorre estos. */
+    /** Tipos de evento que alimentan el reporte; el reporte solo recorre estos. */
     public static final Set<String> EVENT_TYPES = Set.of(AuditEvents.LOCATION_REGISTERED,
             AuditEvents.LOCATION_UPDATED, AuditEvents.MATERIAL_REGISTERED, AuditEvents.MATERIAL_UPDATED,
             AuditEvents.DISPATCH_DEPARTED, AuditEvents.DISPATCH_CANCELLED, AuditEvents.RECEPTION_PARTIALLY_RECEIVED,
@@ -46,10 +43,6 @@ public class ReconciliationProjector {
 
     public ReconciliationProjector(ReconciliationReadModel readModel) {
         this.readModel = readModel;
-    }
-
-    public boolean handles(String eventType) {
-        return EVENT_TYPES.contains(eventType);
     }
 
     public void apply(String eventType, UUID organizationId, String aggregateId, Instant occurredAt,
